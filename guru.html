@@ -107,6 +107,18 @@
   .kem-val{ font-family: var(--font-mono); font-weight:700; color: var(--red); }
   .empty-note{ font-size:13.5px; color: var(--ink-soft); font-style:italic; }
 
+  .chart-box{
+    border:1.5px solid var(--ink); padding:14px 8px 6px; margin-top:8px;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 21px, rgba(21,34,51,.06) 22px),
+      repeating-linear-gradient(90deg, transparent, transparent 21px, rgba(21,34,51,.06) 22px);
+  }
+  .chart-empty{ font-size:13px; color: var(--ink-soft); font-style:italic; padding:18px 6px; text-align:center; }
+  select#studentSelect{
+    width:100%; font-family: var(--font-sans); font-size:14px; color: var(--ink);
+    background: #fff; border: 1.5px solid var(--ink); border-radius:0; padding:9px 10px;
+  }
+
   footer{ text-align:center; font-size:12px; color: var(--text-onblue-muted); margin-top:10px; padding: 20px 10px; line-height:1.8; font-family: var(--font-mono); }
   footer a{ color: var(--text-onblue); text-decoration: none; font-weight:700; }
   footer a:hover{ text-decoration: underline; }
@@ -198,8 +210,21 @@
           </table>
         </div>
         <p class="empty-note" id="rekapEmptyNote" style="display:none;">Belum ada siswa yang mengirim hasil untuk kelas ini.</p>
+
+        <div class="sheet-heading" style="margin-top:22px;">
+          <h2>03 — Grafik Tren KEM</h2>
+          <span class="eyebrow">Per siswa</span>
+        </div>
+        <div class="field">
+          <label class="lbl">Pilih siswa</label>
+          <select id="studentSelect"><option value="">— pilih siswa —</option></select>
+        </div>
+        <div class="chart-box" id="studentChartArea">
+          <p class="chart-empty">Pilih siswa di atas untuk melihat tren KEM-nya.</p>
+        </div>
       </div>
     </div>
+
 
     <div class="btnrow">
       <button class="btn onblue" id="logoutBtn" type="button">Keluar</button>
@@ -221,6 +246,68 @@
   let currentUser = null;
   let classes = [];
   let activeClassId = null;
+
+  // ---------- grafik garis SVG sederhana (dipakai untuk tren KEM per siswa) ----------
+  function buildLineChartSVG(points){
+    const w = 600, h = 190, padL = 38, padR = 14, padT = 16, padB = 30;
+    const innerW = w - padL - padR, innerH = h - padT - padB;
+    const values = points.map(p => p.value);
+    let maxV = Math.max.apply(null, values);
+    let minV = Math.min.apply(null, values.concat([0]));
+    if (maxV === minV) maxV = minV + 10;
+    const range = maxV - minV;
+    const stepX = points.length > 1 ? innerW/(points.length-1) : 0;
+    const xy = points.map((p,i) => {
+      const x = padL + (points.length > 1 ? i*stepX : innerW/2);
+      const y = padT + innerH - ((p.value - minV)/range)*innerH;
+      return { x:x, y:y, label:p.label, value:p.value };
+    });
+    const pathD = xy.map((p,i) => (i===0?'M':'L')+p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ');
+
+    let gridSvg = '';
+    const gridCount = 4;
+    for (let i=0;i<=gridCount;i++){
+      const y = padT + innerH - (i/gridCount)*innerH;
+      const val = Math.round(minV + (i/gridCount)*range);
+      gridSvg += '<line x1="'+padL+'" y1="'+y.toFixed(1)+'" x2="'+(w-padR)+'" y2="'+y.toFixed(1)+'" style="stroke:var(--ink-soft);stroke-opacity:.25;stroke-width:1" />';
+      gridSvg += '<text x="'+(padL-6)+'" y="'+(y+3).toFixed(1)+'" style="font-family:var(--font-mono);font-size:9px;fill:var(--ink-soft)" text-anchor="end">'+val+'</text>';
+    }
+    const dotsSvg = xy.map(p =>
+      '<circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="3.5" style="fill:var(--red)" />'+
+      '<text x="'+p.x.toFixed(1)+'" y="'+(p.y-9).toFixed(1)+'" text-anchor="middle" style="font-family:var(--font-mono);font-size:10px;font-weight:700;fill:var(--red)">'+p.value+'</text>'
+    ).join('');
+    const labelsSvg = xy.map(p =>
+      '<text x="'+p.x.toFixed(1)+'" y="'+(h-9)+'" text-anchor="middle" style="font-family:var(--font-mono);font-size:9px;fill:var(--ink-soft)">'+p.label+'</text>'
+    ).join('');
+
+    return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" style="display:block;">'+
+      gridSvg + '<path d="'+pathD+'" fill="none" style="stroke:var(--red);stroke-width:2" />' + dotsSvg + labelsSvg +
+      '</svg>';
+  }
+  function shortDateLabel(ts){
+    const d = new Date(ts);
+    return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');
+  }
+
+  function populateStudentSelect(){
+    const select = document.getElementById('studentSelect');
+    const names = Array.from(new Set(currentRekapRows.map(r => r.student_name))).sort((a,b) => a.localeCompare(b,'id'));
+    select.innerHTML = '<option value="">— pilih siswa —</option>' + names.map(n => '<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+    document.getElementById('studentChartArea').innerHTML = '<p class="chart-empty">Pilih siswa di atas untuk melihat tren KEM-nya.</p>';
+  }
+
+  document.getElementById('studentSelect').addEventListener('change', (e) => {
+    const name = e.target.value;
+    const area = document.getElementById('studentChartArea');
+    if (!name) { area.innerHTML = '<p class="chart-empty">Pilih siswa di atas untuk melihat tren KEM-nya.</p>'; return; }
+    const rows = currentRekapRows.filter(r => r.student_name === name).slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+    if (rows.length < 2) {
+      area.innerHTML = '<p class="chart-empty">'+name+' baru punya '+rows.length+' percobaan (' + (rows[0] ? Math.round(rows[0].kem)+' kpm' : '-') + '). Tren muncul mulai percobaan kedua.</p>';
+      return;
+    }
+    const points = rows.map(r => ({ label: shortDateLabel(r.created_at), value: Math.round(r.kem) }));
+    area.innerHTML = buildLineChartSVG(points);
+  });
 
   function waitForSupabase(cb){
     if (typeof window.supabase !== 'undefined') { cb(); return; }
@@ -356,9 +443,16 @@
     currentRekapRows = data || [];
     const emptyNote = document.getElementById('rekapEmptyNote');
     tbody.innerHTML = '';
-    if (currentRekapRows.length === 0) { emptyNote.style.display = 'block'; document.getElementById('rekapTable').style.display='none'; return; }
+    if (currentRekapRows.length === 0) {
+      emptyNote.style.display = 'block'; document.getElementById('rekapTable').style.display='none';
+      document.getElementById('studentSelect').innerHTML = '<option value="">— pilih siswa —</option>';
+      document.getElementById('studentChartArea').innerHTML = '<p class="chart-empty">Belum ada data siswa untuk kelas ini.</p>';
+      return;
+    }
     emptyNote.style.display = 'none';
     document.getElementById('rekapTable').style.display='table';
+
+    populateStudentSelect();
 
     currentRekapRows.forEach(r => {
       const tr = document.createElement('tr');

@@ -260,6 +260,14 @@
   .kem-ref th{ color: var(--ink-soft); font-weight:700; text-transform:uppercase; letter-spacing:.06em; font-size:10px; }
   .kem-ref .note{ margin-top:8px; font-style:italic; }
 
+  .chart-box{
+    border:1.5px solid var(--ink); padding:14px 8px 6px; margin-top:8px;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 21px, rgba(21,34,51,.06) 22px),
+      repeating-linear-gradient(90deg, transparent, transparent 21px, rgba(21,34,51,.06) 22px);
+  }
+  .chart-empty{ font-size:13px; color: var(--ink-soft); font-style:italic; padding:18px 6px; text-align:center; }
+
   .instruction{ font-size:14px; color: var(--ink-soft); margin: 0 0 18px; }
 
   footer{ text-align:center; font-size:12px; color: var(--text-onblue-muted); margin-top:22px; padding: 20px 10px; line-height:1.8; font-family: var(--font-mono); }
@@ -409,6 +417,15 @@
           </table>
           <p class="note">Catatan: angka acuan bervariasi antar sumber dan kurikulum — gunakan sebagai gambaran umum, bukan standar baku tunggal.</p>
         </div>
+
+        <div class="sheet-heading" style="margin-top:22px;">
+          <h2>03 — Riwayat KEM</h2>
+          <span class="eyebrow">Tersimpan di perangkat ini</span>
+        </div>
+        <div class="chart-box" id="historyChartArea"></div>
+        <div class="btnrow no-print" style="margin-top:10px;">
+          <button class="btn" id="clearHistoryBtn" type="button">Hapus Riwayat Perangkat Ini</button>
+        </div>
       </div>
 
       <div class="btnrow no-print">
@@ -485,6 +502,88 @@
 
   const LEVELS = { mudah: 0.15, sedang: 0.25, sulit: 0.35 };
   const LEVEL_LABEL = { mudah: 'Mudah (±15%)', sedang: 'Sedang (±25%)', sulit: 'Sulit (±35%)' };
+
+  // ---------- riwayat KEM (localStorage, per perangkat) ----------
+  const HISTORY_KEY = 'metodeklos_riwayat_kem';
+  function loadHistory(){
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch(e){ return []; }
+  }
+  function saveHistoryEntry(entry){
+    const hist = loadHistory();
+    hist.push(entry);
+    while (hist.length > 15) hist.shift();
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(hist)); } catch(e){ /* penyimpanan tidak tersedia, abaikan */ }
+    return hist;
+  }
+  function clearHistory(){
+    try { localStorage.removeItem(HISTORY_KEY); } catch(e){}
+  }
+
+  // ---------- grafik garis SVG sederhana (tanpa library, tetap jalan offline) ----------
+  function buildLineChartSVG(points){
+    const w = 600, h = 190, padL = 38, padR = 14, padT = 16, padB = 30;
+    const innerW = w - padL - padR, innerH = h - padT - padB;
+    const values = points.map(p => p.value);
+    let maxV = Math.max.apply(null, values);
+    let minV = Math.min.apply(null, values.concat([0]));
+    if (maxV === minV) maxV = minV + 10;
+    const range = maxV - minV;
+    const stepX = points.length > 1 ? innerW/(points.length-1) : 0;
+    const xy = points.map((p,i) => {
+      const x = padL + (points.length > 1 ? i*stepX : innerW/2);
+      const y = padT + innerH - ((p.value - minV)/range)*innerH;
+      return { x:x, y:y, label:p.label, value:p.value };
+    });
+    const pathD = xy.map((p,i) => (i===0?'M':'L')+p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ');
+
+    let gridSvg = '';
+    const gridCount = 4;
+    for (let i=0;i<=gridCount;i++){
+      const y = padT + innerH - (i/gridCount)*innerH;
+      const val = Math.round(minV + (i/gridCount)*range);
+      gridSvg += '<line x1="'+padL+'" y1="'+y.toFixed(1)+'" x2="'+(w-padR)+'" y2="'+y.toFixed(1)+'" style="stroke:var(--ink-soft);stroke-opacity:.25;stroke-width:1" />';
+      gridSvg += '<text x="'+(padL-6)+'" y="'+(y+3).toFixed(1)+'" style="font-family:var(--font-mono);font-size:9px;fill:var(--ink-soft)" text-anchor="end">'+val+'</text>';
+    }
+
+    const dotsSvg = xy.map(p =>
+      '<circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="3.5" style="fill:var(--red)" />'+
+      '<text x="'+p.x.toFixed(1)+'" y="'+(p.y-9).toFixed(1)+'" text-anchor="middle" style="font-family:var(--font-mono);font-size:10px;font-weight:700;fill:var(--red)">'+p.value+'</text>'
+    ).join('');
+
+    const labelsSvg = xy.map(p =>
+      '<text x="'+p.x.toFixed(1)+'" y="'+(h-9)+'" text-anchor="middle" style="font-family:var(--font-mono);font-size:9px;fill:var(--ink-soft)">'+p.label+'</text>'
+    ).join('');
+
+    return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" style="display:block;">'+
+      gridSvg +
+      '<path d="'+pathD+'" fill="none" style="stroke:var(--red);stroke-width:2" />'+
+      dotsSvg + labelsSvg +
+      '</svg>';
+  }
+
+  function shortDateLabel(ts){
+    const d = new Date(ts);
+    return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');
+  }
+
+  function renderHistoryChart(){
+    const area = document.getElementById('historyChartArea');
+    const hist = loadHistory();
+    if (hist.length === 0) { area.innerHTML = '<p class="chart-empty">Belum ada riwayat di perangkat ini. Riwayat akan muncul setelah menyelesaikan latihan.</p>'; return; }
+    if (hist.length === 1) {
+      area.innerHTML = '<p class="chart-empty">Percobaan pertama tercatat: <strong style="color:var(--ink)">'+hist[0].kem+' kpm</strong>. Grafik tren akan muncul mulai percobaan kedua.</p>';
+      return;
+    }
+    const points = hist.map(h => ({ label: shortDateLabel(h.t), value: h.kem }));
+    area.innerHTML = buildLineChartSVG(points);
+  }
+
+  document.getElementById('clearHistoryBtn').addEventListener('click', () => {
+    if (confirm('Hapus semua riwayat KEM di perangkat ini? Tindakan ini tidak dapat dibatalkan.')) {
+      clearHistory();
+      renderHistoryChart();
+    }
+  });
 
   let currentLevel = 'sedang';
   let currentMode = 'latihan'; // 'latihan' | 'cetak'
@@ -844,6 +943,9 @@
     document.getElementById('resultsPanel').scrollIntoView({ behavior:'smooth', block:'nearest' });
 
     const titleVal = document.getElementById('titleInput').value.trim() || '(Tanpa judul)';
+    saveHistoryEntry({ t: Date.now(), kem: kem, persen: persen, title: titleVal, level: currentLevel });
+    renderHistoryChart();
+
     submitResultToClass({ K, Wm_sec, B, SI, comprehension, kem, persen, title: titleVal, level: currentLevel });
   });
 
