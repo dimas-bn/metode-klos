@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Metode Klos — Dasbor Guru</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
 
 <!-- Embedded webfonts (Plus Jakarta Sans + Space Mono, latin subset) — fully offline for typography, though this page requires internet for Supabase -->
 <style id="embedded-fonts">
@@ -190,15 +191,48 @@
       </div>
     </div>
 
+    <div class="sheet" id="bankSheet">
+      <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+      <div class="sheet-inner">
+        <div class="sheet-heading"><h2>02 — Bank Bacaan</h2><span class="eyebrow">Simpan &amp; pakai ulang</span></div>
+
+        <div class="field">
+          <label class="lbl">Judul bacaan</label>
+          <input type="text" id="readingTitle" placeholder="Contoh: Pergi ke Sekolah">
+        </div>
+        <div class="field">
+          <label class="lbl">Teks bacaan</label>
+          <textarea id="readingContent" rows="5" placeholder="Tempel atau tulis teks bacaan di sini..." style="width:100%;font-family:var(--font-sans);font-size:15px;color:var(--ink);background:#fff;border:1.5px solid var(--ink);border-radius:0;padding:10px 12px;resize:vertical;"></textarea>
+        </div>
+        <div class="field" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+          <div style="flex:1; min-width:160px;">
+            <label class="lbl">Kerapatan default</label>
+            <select id="readingLevel" style="width:100%; font-family:var(--font-sans); font-size:14px; color:var(--ink); background:#fff; border:1.5px solid var(--ink); border-radius:0; padding:9px 10px;">
+              <option value="mudah">Mudah (±15%)</option>
+              <option value="sedang" selected>Sedang (±25%)</option>
+              <option value="sulit">Sulit (±35%)</option>
+            </select>
+          </div>
+          <button class="btn primary" id="saveReadingBtn" type="button">+ Simpan ke Bank</button>
+        </div>
+        <p class="msg" id="readingMsg"></p>
+
+        <div class="class-list" id="readingList" style="margin-top:16px;"></div>
+        <p class="empty-note" id="readingEmptyNote" style="display:none;">Belum ada bacaan tersimpan. Simpan bacaan pertama di atas untuk dipakai ulang nanti.</p>
+      </div>
+    </div>
+
     <div class="sheet" id="rekapSheet" style="display:none;">
       <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
       <div class="sheet-inner">
         <div class="sheet-heading">
-          <h2>02 — Rekap Nilai</h2>
+          <h2>03 — Rekap Nilai</h2>
           <span class="eyebrow" id="rekapClassLabel">—</span>
         </div>
         <div class="btnrow" style="margin-bottom:16px;">
-          <button class="btn" id="downloadCsvBtn" type="button">⬇ Unduh CSV</button>
+          <button class="btn" id="downloadCsvBtn" type="button">⬇ CSV</button>
+          <button class="btn" id="downloadXlsxBtn" type="button">⬇ Excel (.xlsx)</button>
+          <button class="btn" id="downloadPdfBtn" type="button">⬇ PDF</button>
           <button class="btn" id="refreshRekapBtn" type="button">↻ Muat Ulang</button>
         </div>
         <div style="overflow-x:auto;">
@@ -212,8 +246,8 @@
         <p class="empty-note" id="rekapEmptyNote" style="display:none;">Belum ada siswa yang mengirim hasil untuk kelas ini.</p>
 
         <div class="sheet-heading" style="margin-top:22px;">
-          <h2>03 — Grafik Tren KEM</h2>
-          <span class="eyebrow">Per siswa</span>
+          <h2>04 — Grafik &amp; Rekap Per Siswa</h2>
+          <span class="eyebrow">Tren KEM &amp; ekspor individu</span>
         </div>
         <div class="field">
           <label class="lbl">Pilih siswa</label>
@@ -221,6 +255,10 @@
         </div>
         <div class="chart-box" id="studentChartArea">
           <p class="chart-empty">Pilih siswa di atas untuk melihat tren KEM-nya.</p>
+        </div>
+        <div class="btnrow" style="margin-top:12px;">
+          <button class="btn" id="downloadStudentXlsxBtn" type="button" disabled>⬇ Excel (Siswa)</button>
+          <button class="btn" id="downloadStudentPdfBtn" type="button" disabled>⬇ PDF (Siswa)</button>
         </div>
       </div>
     </div>
@@ -294,19 +332,109 @@
     const names = Array.from(new Set(currentRekapRows.map(r => r.student_name))).sort((a,b) => a.localeCompare(b,'id'));
     select.innerHTML = '<option value="">— pilih siswa —</option>' + names.map(n => '<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
     document.getElementById('studentChartArea').innerHTML = '<p class="chart-empty">Pilih siswa di atas untuk melihat tren KEM-nya.</p>';
+    document.getElementById('downloadStudentXlsxBtn').disabled = true;
+    document.getElementById('downloadStudentPdfBtn').disabled = true;
+    selectedStudentRows = []; selectedStudentName = '';
   }
+
+  let selectedStudentRows = [];
+  let selectedStudentName = '';
 
   document.getElementById('studentSelect').addEventListener('change', (e) => {
     const name = e.target.value;
     const area = document.getElementById('studentChartArea');
-    if (!name) { area.innerHTML = '<p class="chart-empty">Pilih siswa di atas untuk melihat tren KEM-nya.</p>'; return; }
+    const xlsxBtn = document.getElementById('downloadStudentXlsxBtn');
+    const pdfBtn = document.getElementById('downloadStudentPdfBtn');
+    selectedStudentName = name;
+
+    if (!name) {
+      area.innerHTML = '<p class="chart-empty">Pilih siswa di atas untuk melihat tren KEM-nya.</p>';
+      selectedStudentRows = [];
+      xlsxBtn.disabled = true; pdfBtn.disabled = true;
+      return;
+    }
     const rows = currentRekapRows.filter(r => r.student_name === name).slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+    selectedStudentRows = rows;
+    xlsxBtn.disabled = false; pdfBtn.disabled = false;
+
     if (rows.length < 2) {
       area.innerHTML = '<p class="chart-empty">'+name+' baru punya '+rows.length+' percobaan (' + (rows[0] ? Math.round(rows[0].kem)+' kpm' : '-') + '). Tren muncul mulai percobaan kedua.</p>';
       return;
     }
     const points = rows.map(r => ({ label: shortDateLabel(r.created_at), value: Math.round(r.kem) }));
     area.innerHTML = buildLineChartSVG(points);
+  });
+
+  // ---------- EKSPOR EXCEL & PDF ----------
+  function formatDuration(sec){
+    const mm = Math.floor(sec/60), ss = Math.round(sec%60);
+    return String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
+  }
+
+  function rowsToExportData(rows){
+    return rows.map(r => ({
+      'Nama Siswa': r.student_name,
+      'Judul': r.title || '',
+      'Level': r.level || '',
+      'Waktu': formatDuration(r.duration_seconds),
+      'Benar': r.correct,
+      'Total Soal': r.total_blanks,
+      'Pemahaman (%)': r.comprehension_percent,
+      'KEM (kpm)': Math.round(r.kem),
+      'Tanggal': new Date(r.created_at).toLocaleString('id-ID')
+    }));
+  }
+
+  function exportToExcel(rows, filename, sheetName){
+    if (typeof XLSX === 'undefined') { alert('Modul Excel belum termuat. Periksa koneksi internet lalu coba lagi.'); return; }
+    if (rows.length === 0) { alert('Belum ada data untuk diekspor.'); return; }
+    const ws = XLSX.utils.json_to_sheet(rowsToExportData(rows));
+    ws['!cols'] = [{wch:20},{wch:22},{wch:10},{wch:8},{wch:8},{wch:10},{wch:12},{wch:10},{wch:20}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, (sheetName || 'Rekap').slice(0,31));
+    XLSX.writeFile(wb, filename);
+  }
+
+  function exportToPDF(rows, reportTitle, subtitle){
+    if (rows.length === 0) { alert('Belum ada data untuk diekspor.'); return; }
+    const w = window.open('', '_blank');
+    if (!w) { alert('Popup diblokir browser. Izinkan popup untuk situs ini agar bisa mengekspor PDF.'); return; }
+    const rowsHtml = rows.map(r =>
+      '<tr><td>'+escapeHtml(r.student_name)+'</td><td>'+escapeHtml(r.title||'')+'</td><td>'+escapeHtml(r.level||'')+'</td><td>'+
+      formatDuration(r.duration_seconds)+'</td><td>'+r.correct+' / '+r.total_blanks+'</td><td>'+r.comprehension_percent+'%</td><td><strong>'+
+      Math.round(r.kem)+' kpm</strong></td><td>'+new Date(r.created_at).toLocaleDateString('id-ID')+'</td></tr>'
+    ).join('');
+    const html = '<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>'+escapeHtml(reportTitle)+'</title><style>'+
+      'body{font-family:"Courier New",monospace;color:#152233;padding:28px;}'+
+      'h1{font-size:19px;margin:0;letter-spacing:.04em;text-transform:uppercase;}'+
+      '.sub{color:#516175;font-size:12px;margin:6px 0 22px;}'+
+      'table{width:100%;border-collapse:collapse;font-size:11.5px;}'+
+      'th,td{border:1px solid #152233;padding:6px 8px;text-align:left;}'+
+      'th{background:#152233;color:#fff;text-transform:uppercase;font-size:9.5px;letter-spacing:.05em;}'+
+      '.foot{font-size:10.5px;color:#516175;margin-top:22px;}'+
+      '@media print{ body{padding:10px;} }'+
+      '</style></head><body>'+
+      '<h1>Metode Klos — '+escapeHtml(reportTitle)+'</h1>'+
+      '<p class="sub">'+escapeHtml(subtitle)+'</p>'+
+      '<table><thead><tr><th>Nama Siswa</th><th>Judul</th><th>Level</th><th>Waktu</th><th>Benar</th><th>Pemahaman</th><th>KEM</th><th>Tanggal</th></tr></thead>'+
+      '<tbody>'+rowsHtml+'</tbody></table>'+
+      '<p class="foot">Dicetak dari Dasbor Guru Metode Klos — '+new Date().toLocaleString('id-ID')+'</p>'+
+      '</body></html>';
+    w.document.open(); w.document.write(html); w.document.close();
+    w.onload = () => { w.focus(); w.print(); };
+  }
+
+  document.getElementById('downloadXlsxBtn').addEventListener('click', () => {
+    exportToExcel(currentRekapRows, 'rekap-'+currentClassName.replace(/\s+/g,'_')+'.xlsx', currentClassName);
+  });
+  document.getElementById('downloadPdfBtn').addEventListener('click', () => {
+    exportToPDF(currentRekapRows, 'Rekap Nilai Kelas', 'Kelas: '+currentClassName+' — Dicetak '+new Date().toLocaleDateString('id-ID'));
+  });
+  document.getElementById('downloadStudentXlsxBtn').addEventListener('click', () => {
+    exportToExcel(selectedStudentRows, 'rekap-'+selectedStudentName.replace(/\s+/g,'_')+'.xlsx', selectedStudentName);
+  });
+  document.getElementById('downloadStudentPdfBtn').addEventListener('click', () => {
+    exportToPDF(selectedStudentRows, 'Rekap Nilai Siswa', 'Nama: '+selectedStudentName+' — Kelas: '+currentClassName+' — Dicetak '+new Date().toLocaleDateString('id-ID'));
   });
 
   function waitForSupabase(cb){
@@ -382,7 +510,7 @@
   }
 
   async function loadClasses(){
-    const { data, error } = await sb.from('classes').select('id,name,code,created_at').eq('teacher_id', currentUser.id).order('created_at', { ascending:false });
+    const { data, error } = await sb.from('classes').select('id,name,code,leaderboard_enabled,created_at').eq('teacher_id', currentUser.id).order('created_at', { ascending:false });
     if (error) { document.getElementById('classMsg').className='msg err'; document.getElementById('classMsg').textContent='Gagal memuat kelas.'; return; }
     classes = data || [];
     renderClassList();
@@ -399,6 +527,21 @@
       const row = document.createElement('div');
       row.className = 'class-row' + (c.id === activeClassId ? ' active' : '');
       row.innerHTML = '<div><span class="cname">'+escapeHtml(c.name)+'</span> &nbsp; <span class="ccode">'+c.code+'</span></div>';
+
+      const lbLabel = document.createElement('label');
+      lbLabel.className = 'check-row';
+      lbLabel.style.marginRight = '4px';
+      lbLabel.innerHTML = '<input type="checkbox" '+(c.leaderboard_enabled ? 'checked' : '')+'> 🏆 Leaderboard';
+      const lbCheckbox = lbLabel.querySelector('input');
+      lbCheckbox.addEventListener('change', async () => {
+        lbCheckbox.disabled = true;
+        const { error } = await sb.from('classes').update({ leaderboard_enabled: lbCheckbox.checked }).eq('id', c.id);
+        if (error) { alert('Gagal mengubah leaderboard: ' + error.message); lbCheckbox.checked = !lbCheckbox.checked; }
+        else { c.leaderboard_enabled = lbCheckbox.checked; }
+        lbCheckbox.disabled = false;
+      });
+      row.appendChild(lbLabel);
+
       const btn = document.createElement('button');
       btn.className = 'btn'; btn.type='button'; btn.textContent = 'Lihat Rekap';
       btn.addEventListener('click', () => { activeClassId = c.id; renderClassList(); loadRekap(c); });
@@ -426,6 +569,79 @@
     msg.className='msg err'; msg.textContent='Gagal membuat kelas: ' + (lastErr ? lastErr.message : 'coba lagi.');
   });
 
+  // ---------- BANK BACAAN ----------
+  const LEVEL_LABEL_GURU = { mudah: 'Mudah', sedang: 'Sedang', sulit: 'Sulit' };
+  let readings = [];
+
+  async function loadReadings(){
+    const { data, error } = await sb.from('readings').select('id,title,content,level,created_at').eq('teacher_id', currentUser.id).order('created_at', { ascending:false });
+    if (error) { document.getElementById('readingMsg').className='msg err'; document.getElementById('readingMsg').textContent='Gagal memuat bank bacaan.'; return; }
+    readings = data || [];
+    renderReadingsList();
+  }
+
+  function renderReadingsList(){
+    const list = document.getElementById('readingList');
+    const emptyNote = document.getElementById('readingEmptyNote');
+    list.innerHTML = '';
+    if (readings.length === 0) { emptyNote.style.display = 'block'; return; }
+    emptyNote.style.display = 'none';
+    readings.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'class-row';
+      const preview = r.content.length > 70 ? r.content.slice(0,70) + '…' : r.content;
+      row.innerHTML =
+        '<div style="flex:1;min-width:200px;">'+
+          '<span class="cname">'+escapeHtml(r.title)+'</span> &nbsp; <span class="ccode" style="background:var(--ink-soft);">'+(LEVEL_LABEL_GURU[r.level]||r.level)+'</span>'+
+          '<div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px;">'+escapeHtml(preview)+'</div>'+
+        '</div>';
+      const btnGroup = document.createElement('div');
+      btnGroup.style.display = 'flex'; btnGroup.style.gap = '8px'; btnGroup.style.flexWrap='wrap';
+
+      const useBtn = document.createElement('button');
+      useBtn.className = 'btn primary'; useBtn.type = 'button'; useBtn.textContent = 'Pakai di Lembar Kerja';
+      useBtn.addEventListener('click', () => useReading(r));
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn'; delBtn.type = 'button'; delBtn.textContent = 'Hapus';
+      delBtn.addEventListener('click', () => deleteReading(r.id));
+
+      btnGroup.appendChild(useBtn); btnGroup.appendChild(delBtn);
+      row.appendChild(btnGroup);
+      list.appendChild(row);
+    });
+  }
+
+  document.getElementById('saveReadingBtn').addEventListener('click', async () => {
+    const title = document.getElementById('readingTitle').value.trim();
+    const content = document.getElementById('readingContent').value.trim();
+    const level = document.getElementById('readingLevel').value;
+    const msg = document.getElementById('readingMsg');
+    msg.className='msg'; msg.textContent='';
+    if (!title || !content) { msg.className='msg err'; msg.textContent='Isi judul dan teks bacaan dulu.'; return; }
+
+    const { error } = await sb.from('readings').insert({ teacher_id: currentUser.id, title, content, level });
+    if (error) { msg.className='msg err'; msg.textContent='Gagal menyimpan: '+error.message; return; }
+    document.getElementById('readingTitle').value = '';
+    document.getElementById('readingContent').value = '';
+    msg.className='msg ok'; msg.textContent='Bacaan "'+title+'" tersimpan ke bank.';
+    await loadReadings();
+  });
+
+  async function deleteReading(id){
+    if (!confirm('Hapus bacaan ini dari bank? Tindakan ini tidak dapat dibatalkan.')) return;
+    const { error } = await sb.from('readings').delete().eq('id', id);
+    if (error) { alert('Gagal menghapus: ' + error.message); return; }
+    await loadReadings();
+  }
+
+  function useReading(r){
+    try {
+      localStorage.setItem('metodeklos_handoff', JSON.stringify({ title: r.title, content: r.content, level: r.level }));
+    } catch(e) { alert('Gagal menyiapkan bacaan (penyimpanan browser tidak tersedia).'); return; }
+    window.open('index.html', '_blank');
+  }
+
   // ---------- REKAP ----------
   let currentRekapRows = [];
   let currentClassName = '';
@@ -447,6 +663,8 @@
       emptyNote.style.display = 'block'; document.getElementById('rekapTable').style.display='none';
       document.getElementById('studentSelect').innerHTML = '<option value="">— pilih siswa —</option>';
       document.getElementById('studentChartArea').innerHTML = '<p class="chart-empty">Belum ada data siswa untuk kelas ini.</p>';
+      document.getElementById('downloadStudentXlsxBtn').disabled = true;
+      document.getElementById('downloadStudentPdfBtn').disabled = true;
       return;
     }
     emptyNote.style.display = 'none';
@@ -501,6 +719,7 @@
       document.getElementById('dashboardView').style.display = 'block';
       document.getElementById('tbTeacherEmail').textContent = currentUser.email;
       await loadClasses();
+      await loadReadings();
     } else {
       currentUser = null;
       document.getElementById('authSheet').style.display = 'block';

@@ -236,6 +236,19 @@
   .blank-i.incorrect input{ border-bottom-color: var(--red); background: var(--red-soft); }
   .blank-i .correct-answer{ font-family: var(--font-mono); font-size:11px; color: var(--red); font-style:italic; }
 
+  /* ---------- pilihan ganda (mode SD) ---------- */
+  .mc-list{ margin-top:20px; border-top: 1.5px dashed var(--paper-edge); padding-top:16px; }
+  .mc-item{ margin-bottom:16px; padding:10px 12px; border:1.5px solid var(--paper-edge); }
+  .mc-item .mc-q{ font-family: var(--font-mono); font-size:12px; font-weight:700; color: var(--ink-soft); display:block; margin-bottom:8px; letter-spacing:.04em; text-transform:uppercase; }
+  .mc-options{ display:grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap:8px; }
+  .mc-opt{ display:flex; align-items:center; gap:7px; font-size:14.5px; cursor:pointer; padding:6px 8px; border:1.5px solid transparent; }
+  .mc-opt input{ accent-color: var(--red); width:15px; height:15px; }
+  .mc-opt .mc-letter{ font-family: var(--font-mono); font-weight:700; color: var(--ink-soft); font-size:12px; }
+  .mc-item.correct{ border-color: var(--green); background: var(--green-soft); }
+  .mc-item.incorrect{ border-color: var(--red); background: var(--red-soft); }
+  .mc-opt.is-correct-answer{ font-weight:700; color: var(--green); }
+  .mc-opt.is-correct-answer .mc-letter{ color: var(--green); }
+
   /* ---------- timer readout ---------- */
   .timer-box{
     display:flex; align-items:center; justify-content:space-between; gap:14px;
@@ -267,6 +280,18 @@
       repeating-linear-gradient(90deg, transparent, transparent 21px, rgba(21,34,51,.06) 22px);
   }
   .chart-empty{ font-size:13px; color: var(--ink-soft); font-style:italic; padding:18px 6px; text-align:center; }
+
+  /* ---------- leaderboard ---------- */
+  .lb-list{ display:grid; gap:6px; }
+  .lb-row{ display:flex; align-items:center; gap:10px; padding:8px 10px; border:1.5px solid var(--paper-edge); }
+  .lb-row.me{ border-color: var(--red); background: var(--red-soft); }
+  .lb-rank{ font-family: var(--font-mono); font-weight:700; font-size:13px; width:28px; color: var(--ink-soft); }
+  .lb-row:nth-child(1) .lb-rank{ color:#B8860B; }
+  .lb-row:nth-child(2) .lb-rank{ color:#7A7A7A; }
+  .lb-row:nth-child(3) .lb-rank{ color:#8C5A2B; }
+  .lb-name{ flex:1; font-size:14px; }
+  .lb-name.me-label::after{ content:' (Anda)'; font-size:11px; color: var(--red); font-weight:700; }
+  .lb-kem{ font-family: var(--font-mono); font-weight:700; color: var(--red); font-size:13px; }
 
   .instruction{ font-size:14px; color: var(--ink-soft); margin: 0 0 18px; }
 
@@ -344,6 +369,14 @@
       </div>
 
       <div class="field">
+        <label class="lbl">Jenis jawaban</label>
+        <div class="seg" id="answerTypeSeg">
+          <button data-atype="ketik" class="active" type="button">Ketik Jawaban</button>
+          <button data-atype="pilihan" type="button">Pilihan Ganda (SD)</button>
+        </div>
+      </div>
+
+      <div class="field">
         <label class="lbl">Nama siswa (opsional — isi jika ingin hasil dikirim ke guru)</label>
         <input type="text" id="studentNameInput" placeholder="Contoh: Ahmad Fauzi">
       </div>
@@ -396,6 +429,7 @@
       </div>
 
       <p class="cloze-text" id="clozeText"></p>
+      <div class="mc-list" id="mcList" style="display:none;"></div>
 
       <div id="resultsPanel" style="display:none;">
         <div class="sheet-heading" style="margin-top:8px;">
@@ -425,6 +459,14 @@
         <div class="chart-box" id="historyChartArea"></div>
         <div class="btnrow no-print" style="margin-top:10px;">
           <button class="btn" id="clearHistoryBtn" type="button">Hapus Riwayat Perangkat Ini</button>
+        </div>
+
+        <div id="leaderboardSection" style="display:none;">
+          <div class="sheet-heading" style="margin-top:22px;">
+            <h2>04 — Papan Peringkat Kelas</h2>
+            <span class="eyebrow">Diaktifkan oleh guru</span>
+          </div>
+          <div class="lb-list" id="leaderboardArea"></div>
         </div>
       </div>
 
@@ -587,6 +629,7 @@
 
   let currentLevel = 'sedang';
   let currentMode = 'latihan'; // 'latihan' | 'cetak'
+  let answerType = 'ketik'; // 'ketik' | 'pilihan'
   let tokens = [];
   let showAnswers = false;
   let revision = 0;
@@ -599,6 +642,22 @@
   let testFinished = false;
 
   document.querySelector('#answerBtn .btn-ic').innerHTML = ICON_EYE;
+
+  // ---------- terima bacaan dari Bank Bacaan (guru.html) via localStorage ----------
+  (function receiveHandoff(){
+    try {
+      const raw = localStorage.getItem('metodeklos_handoff');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (data.title) document.getElementById('titleInput').value = data.title;
+      if (data.content) document.getElementById('inputText').value = data.content;
+      if (data.level && LEVELS[data.level]) {
+        document.querySelectorAll('#levelRuler button').forEach(b => b.classList.toggle('active', b.dataset.level === data.level));
+        currentLevel = data.level;
+      }
+      localStorage.removeItem('metodeklos_handoff');
+    } catch(e) { /* abaikan jika data tidak valid */ }
+  })();
 
   // ---------- level ruler ----------
   document.querySelectorAll('#levelRuler button').forEach(btn => {
@@ -615,6 +674,15 @@
       document.querySelectorAll('#modeSeg button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       currentMode = btn.dataset.mode;
+    });
+  });
+
+  // ---------- jenis jawaban segmented ----------
+  document.querySelectorAll('#answerTypeSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#answerTypeSeg button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      answerType = btn.dataset.atype;
     });
   });
 
@@ -647,7 +715,7 @@
   function autoBlank() {
     const ratio = LEVELS[currentLevel];
     const wordTokens = getAllWordTokens();
-    wordTokens.forEach(t => t.blank = false);
+    wordTokens.forEach(t => { t.blank = false; t.choices = null; });
 
     const candidates = [];
     wordTokens.forEach((t, pos) => {
@@ -696,13 +764,46 @@
     return elapsedMs;
   }
 
+  // ---------- bank kata cadangan untuk distraktor pilihan ganda ----------
+  const FALLBACK_CHOICE_WORDS = ['rumah','sekolah','teman','pergi','pulang','bermain','belajar','senang',
+    'sedih','besar','kecil','cepat','lambat','indah','gelap','terang','makan','minum','tidur','bangun',
+    'ibu','ayah','adik','kakak','guru','murid','buku','meja','kursi','jalan','taman','sungai','gunung',
+    'laut','hujan','matahari','bulan','bintang','angin','pohon','bunga','daun','hewan','burung','ikan',
+    'kucing','anjing','mobil','sepeda','baju','sepatu','tas','pensil','kertas','pintar','rajin','ramah'];
+
+  function shuffleArr(arr){
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]] = [a[j],a[i]]; }
+    return a;
+  }
+
+  function pickChoices(correctWord, pool){
+    const correctLower = correctWord.toLowerCase();
+    const candidates = shuffleArr(Array.from(new Set(pool.filter(w => w.toLowerCase() !== correctLower))));
+    let distractors = candidates.slice(0, 3);
+    if (distractors.length < 3) {
+      const fallback = shuffleArr(FALLBACK_CHOICE_WORDS.filter(w =>
+        w.toLowerCase() !== correctLower && !distractors.some(d => d.toLowerCase() === w.toLowerCase())
+      ));
+      while (distractors.length < 3 && fallback.length) distractors.push(fallback.pop());
+    }
+    return shuffleArr(distractors.concat([correctWord]));
+  }
+
   // ---------- render ----------
+  let currentBlankTokens = [];
+
   function render() {
     const showBank = document.getElementById('bankToggle').checked;
     const container = document.getElementById('clozeText');
     container.innerHTML = '';
     let blankNum = 0;
     const blankedWords = [];
+    currentBlankTokens = [];
+
+    const wordPool = getAllWordTokens()
+      .filter(w => w.text.length >= 3 && !STOPWORDS.has(w.text.toLowerCase()))
+      .map(w => w.text);
 
     tokens.forEach(para => {
       const pEl = document.createElement('p');
@@ -712,8 +813,9 @@
         } else if (t.blank) {
           blankNum++;
           blankedWords.push(t.text);
+          currentBlankTokens.push(t);
 
-          if (currentMode === 'latihan') {
+          if (currentMode === 'latihan' && answerType === 'ketik') {
             const wrap = document.createElement('span');
             wrap.className = 'blank-i';
             wrap.dataset.idx = blankNum;
@@ -732,7 +834,22 @@
             inp.disabled = !timerRunning;
             wrap.appendChild(inp);
             pEl.appendChild(wrap);
+          } else if (currentMode === 'latihan' && answerType === 'pilihan') {
+            if (!t.choices) t.choices = pickChoices(t.text, wordPool);
+            const wrap = document.createElement('span');
+            wrap.className = 'blank-i';
+            wrap.dataset.idx = blankNum;
+            const num = document.createElement('span');
+            num.className = 'blank-num';
+            num.textContent = '['+blankNum+']';
+            wrap.appendChild(num);
+            const line = document.createElement('span');
+            line.className = 'blank-line';
+            line.style.minWidth = '46px';
+            wrap.appendChild(line);
+            pEl.appendChild(wrap);
           } else {
+            if (answerType === 'pilihan' && !t.choices) t.choices = pickChoices(t.text, wordPool);
             const wrap = document.createElement('span');
             wrap.className = 'blank';
             wrap.title = 'Klik untuk hapus isian';
@@ -743,7 +860,7 @@
 
             const line = document.createElement('span');
             line.className = 'blank-line';
-            if (showAnswers) {
+            if (showAnswers && answerType === 'ketik') {
               const ans = document.createElement('span');
               ans.className = 'answer-preview';
               ans.textContent = t.text;
@@ -763,7 +880,7 @@
 
             wrap.appendChild(num);
             wrap.appendChild(line);
-            wrap.addEventListener('click', () => { t.blank = false; render(); });
+            wrap.addEventListener('click', () => { t.blank = false; t.choices = null; render(); });
             pEl.appendChild(wrap);
           }
         } else {
@@ -780,6 +897,8 @@
       container.appendChild(pEl);
     });
 
+    renderMcList();
+
     const bankArea = document.getElementById('bankArea');
     if (showBank && blankedWords.length > 0) {
       bankArea.style.display = 'block';
@@ -795,6 +914,55 @@
     } else {
       bankArea.style.display = 'none';
     }
+  }
+
+  function renderMcList(){
+    const mcList = document.getElementById('mcList');
+    if (answerType !== 'pilihan' || currentBlankTokens.length === 0) {
+      mcList.style.display = 'none';
+      mcList.innerHTML = '';
+      return;
+    }
+    mcList.style.display = 'block';
+    mcList.innerHTML = '';
+    const letters = ['A','B','C','D'];
+    const interactive = (currentMode === 'latihan');
+
+    currentBlankTokens.forEach((t, i) => {
+      const idx = i + 1;
+      const item = document.createElement('div');
+      item.className = 'mc-item';
+      item.dataset.idx = idx;
+
+      const q = document.createElement('span');
+      q.className = 'mc-q';
+      q.textContent = 'Soal ['+idx+']';
+      item.appendChild(q);
+
+      const optsWrap = document.createElement('div');
+      optsWrap.className = 'mc-options';
+      (t.choices || [t.text]).forEach((choice, ci) => {
+        const label = document.createElement('label');
+        label.className = 'mc-opt';
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'mc-'+idx;
+        radio.value = choice;
+        radio.disabled = interactive ? !timerRunning : true;
+        const letterSpan = document.createElement('span');
+        letterSpan.className = 'mc-letter';
+        letterSpan.textContent = letters[ci] + '.';
+        label.appendChild(radio);
+        label.appendChild(letterSpan);
+        label.appendChild(document.createTextNode(' ' + choice));
+        if (!interactive && showAnswers && choice.toLowerCase() === t.text.toLowerCase()) {
+          label.classList.add('is-correct-answer');
+        }
+        optsWrap.appendChild(label);
+      });
+      item.appendChild(optsWrap);
+      mcList.appendChild(item);
+    });
   }
 
   function updateTitleBlock(){
@@ -818,6 +986,7 @@
     document.getElementById('finishReadBtn').style.display = 'none';
     document.getElementById('resultsPanel').style.display = 'none';
     document.getElementById('retryBtn').style.display = 'none';
+    document.getElementById('leaderboardSection').style.display = 'none';
   }
 
   function enterMode(){
@@ -827,12 +996,16 @@
     if (currentMode === 'latihan') {
       timerBox.style.display = 'flex';
       answerBtn.style.display = 'none';
-      instructionText.textContent = 'Klik "Mulai Membaca" lalu isi setiap kolom isian berdasarkan konteks kalimat. Waktu akan tercatat otomatis.';
+      instructionText.textContent = answerType === 'pilihan'
+        ? 'Klik "Mulai Membaca" lalu pilih jawaban (A/B/C/D) yang paling tepat untuk setiap isian di bawah teks. Waktu akan tercatat otomatis.'
+        : 'Klik "Mulai Membaca" lalu isi setiap kolom isian berdasarkan konteks kalimat. Waktu akan tercatat otomatis.';
       resetPracticeUI();
     } else {
       timerBox.style.display = 'none';
       answerBtn.style.display = 'inline-flex';
-      instructionText.textContent = 'Klik kata mana pun pada teks untuk menjadikannya isian. Klik garis isian untuk membatalkan. Gunakan "Tampilkan Jawaban" sebagai kunci guru.';
+      instructionText.textContent = answerType === 'pilihan'
+        ? 'Klik kata mana pun pada teks untuk menjadikannya isian. Soal pilihan ganda otomatis muncul di bawah teks. Gunakan "Tampilkan Jawaban" sebagai kunci guru.'
+        : 'Klik kata mana pun pada teks untuk menjadikannya isian. Klik garis isian untuk membatalkan. Gunakan "Tampilkan Jawaban" sebagai kunci guru.';
     }
   }
 
@@ -880,11 +1053,14 @@
   // ---------- practice / timer / scoring ----------
   document.getElementById('startReadBtn').addEventListener('click', () => {
     document.querySelectorAll('.blank-i input').forEach(inp => inp.disabled = false);
+    document.querySelectorAll('#mcList input[type="radio"]').forEach(r => r.disabled = false);
     startTimer();
     document.getElementById('startReadBtn').style.display = 'none';
     document.getElementById('finishReadBtn').style.display = 'inline-flex';
-    const firstInput = document.querySelector('.blank-i input');
-    if (firstInput) firstInput.focus();
+    if (answerType === 'ketik') {
+      const firstInput = document.querySelector('.blank-i input');
+      if (firstInput) firstInput.focus();
+    }
   });
 
   document.getElementById('finishReadBtn').addEventListener('click', () => {
@@ -894,23 +1070,42 @@
     document.getElementById('retryBtn').style.display = 'inline-flex';
 
     let correct = 0;
-    const blanksList = document.querySelectorAll('.blank-i');
-    blanksList.forEach(wrap => {
-      const inp = wrap.querySelector('input');
-      inp.disabled = true;
-      const given = inp.value.trim().toLowerCase();
-      const answer = inp.dataset.answer;
-      if (given === answer && given.length > 0) {
-        correct++;
-        wrap.classList.add('correct');
-      } else {
-        wrap.classList.add('incorrect');
-        const tag = document.createElement('span');
-        tag.className = 'correct-answer';
-        tag.textContent = '('+answer+')';
-        wrap.appendChild(tag);
-      }
-    });
+    if (answerType === 'ketik') {
+      const blanksList = document.querySelectorAll('.blank-i');
+      blanksList.forEach(wrap => {
+        const inp = wrap.querySelector('input');
+        inp.disabled = true;
+        const given = inp.value.trim().toLowerCase();
+        const answer = inp.dataset.answer;
+        if (given === answer && given.length > 0) {
+          correct++;
+          wrap.classList.add('correct');
+        } else {
+          wrap.classList.add('incorrect');
+          const tag = document.createElement('span');
+          tag.className = 'correct-answer';
+          tag.textContent = '('+answer+')';
+          wrap.appendChild(tag);
+        }
+      });
+    } else {
+      document.querySelectorAll('#mcList .mc-item').forEach((item, i) => {
+        const t = currentBlankTokens[i];
+        const radios = item.querySelectorAll('input[type="radio"]');
+        let selected = null;
+        radios.forEach(r => { r.disabled = true; if (r.checked) selected = r.value; });
+        if (selected && t && selected.toLowerCase() === t.text.toLowerCase()) {
+          correct++;
+          item.classList.add('correct');
+        } else {
+          item.classList.add('incorrect');
+          item.querySelectorAll('.mc-opt').forEach(lbl => {
+            const r = lbl.querySelector('input');
+            if (t && r.value.toLowerCase() === t.text.toLowerCase()) lbl.classList.add('is-correct-answer');
+          });
+        }
+      });
+    }
 
     const K = countTotalWords();
     const SI = countBlanks();
@@ -963,7 +1158,7 @@
 
     statusEl.textContent = 'Mengirim hasil ke guru...';
     try {
-      const { data: kelas, error: findErr } = await sb.from('classes').select('id').eq('code', classCode).maybeSingle();
+      const { data: kelas, error: findErr } = await sb.from('classes').select('id,leaderboard_enabled').eq('code', classCode).maybeSingle();
       if (findErr || !kelas) { statusEl.textContent = 'Kode kelas tidak ditemukan — hasil tidak terkirim, tapi tetap tersimpan di layar ini.'; return; }
 
       const { error: insertErr } = await sb.from('attempts').insert({
@@ -980,10 +1175,52 @@
       });
       if (insertErr) { statusEl.textContent = 'Gagal mengirim hasil ke guru. Coba lagi nanti.'; return; }
       statusEl.textContent = '✓ Hasil terkirim ke guru (kelas ' + classCode + ').';
+
+      if (kelas.leaderboard_enabled) {
+        await renderLeaderboard(sb, kelas.id, studentName);
+      } else {
+        document.getElementById('leaderboardSection').style.display = 'none';
+      }
     } catch(e) {
       statusEl.textContent = 'Gagal mengirim hasil (cek koneksi internet).';
     }
   }
+
+  async function renderLeaderboard(sb, classId, myName){
+    const section = document.getElementById('leaderboardSection');
+    const area = document.getElementById('leaderboardArea');
+    try {
+      const { data, error } = await sb.from('attempts').select('student_name,kem').eq('class_id', classId);
+      if (error || !data || data.length === 0) { section.style.display = 'none'; return; }
+
+      const bestByStudent = {};
+      data.forEach(row => {
+        const name = row.student_name;
+        if (!bestByStudent[name] || row.kem > bestByStudent[name]) bestByStudent[name] = row.kem;
+      });
+      const ranked = Object.keys(bestByStudent)
+        .map(name => ({ name, kem: bestByStudent[name] }))
+        .sort((a,b) => b.kem - a.kem)
+        .slice(0, 10);
+
+      area.innerHTML = '';
+      ranked.forEach((row, i) => {
+        const isMe = row.name.toLowerCase() === myName.toLowerCase();
+        const div = document.createElement('div');
+        div.className = 'lb-row' + (isMe ? ' me' : '');
+        div.innerHTML =
+          '<span class="lb-rank">'+(i+1)+'.</span>'+
+          '<span class="lb-name'+(isMe ? ' me-label' : '')+'">'+escapeHtmlIndex(row.name)+'</span>'+
+          '<span class="lb-kem">'+Math.round(row.kem)+' kpm</span>';
+        area.appendChild(div);
+      });
+      section.style.display = 'block';
+    } catch(e) {
+      section.style.display = 'none';
+    }
+  }
+
+  function escapeHtmlIndex(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
   document.getElementById('retryBtn').addEventListener('click', () => {
     resetPracticeUI();
