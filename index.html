@@ -144,13 +144,22 @@
     letter-spacing:.1em; text-transform:uppercase; color: var(--ink-soft);
     margin-bottom:6px;
   }
-  input[type="text"], textarea{
+  input[type="text"], textarea, select{
     width:100%; font-family: var(--font-sans); font-size:15px; color: var(--ink);
     background: #fff; border: 1.5px solid var(--ink); border-radius:0;
     padding:10px 12px; resize:vertical;
   }
-  input[type="text"]:focus, textarea:focus{ outline:2px solid var(--red); outline-offset:-1px; }
+  input[type="text"]:focus, textarea:focus, select:focus{ outline:2px solid var(--red); outline-offset:-1px; }
   textarea{ line-height:1.6; }
+
+  .ai-box{
+    border: 1.5px dashed var(--ink); padding:14px; margin-bottom:18px;
+    background: repeating-linear-gradient(135deg, transparent, transparent 8px, rgba(216,73,46,.05) 8px, rgba(216,73,46,.05) 16px);
+  }
+  .ai-row{ display:flex; gap:10px; flex-wrap:wrap; margin:10px 0 12px; }
+  .ai-col{ flex:1; min-width:130px; }
+  .ai-col .lbl{ font-size:9.5px; margin-bottom:4px; }
+  .ai-col select, .ai-col input{ font-size:13.5px; padding:8px 10px; }
 
   /* ---------- scale / ruler segmented control ---------- */
   .ruler{ display:flex; border:1.5px solid var(--ink); }
@@ -344,6 +353,36 @@
       <div class="field">
         <label class="lbl">Judul bacaan (opsional)</label>
         <input type="text" id="titleInput" placeholder="Contoh: Pergi ke Sekolah">
+      </div>
+
+      <div class="ai-box">
+        <span class="eyebrow">✨ Buat Teks Otomatis dengan AI (opsional)</span>
+        <div class="ai-row">
+          <div class="ai-col">
+            <label class="lbl">Jenjang</label>
+            <select id="aiJenjang">
+              <option value="SD kelas 1-2">SD Kelas 1-2</option>
+              <option value="SD kelas 3-4" selected>SD Kelas 3-4</option>
+              <option value="SD kelas 5-6">SD Kelas 5-6</option>
+              <option value="SMP">SMP</option>
+              <option value="SMA">SMA</option>
+            </select>
+          </div>
+          <div class="ai-col" style="flex:2;">
+            <label class="lbl">Topik</label>
+            <input type="text" id="aiTopik" placeholder="Contoh: gotong royong, hewan peliharaan">
+          </div>
+          <div class="ai-col">
+            <label class="lbl">Panjang</label>
+            <select id="aiPanjang">
+              <option value="pendek">Pendek</option>
+              <option value="sedang" selected>Sedang</option>
+              <option value="panjang">Panjang</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn" id="aiGenerateBtn" type="button">✨ Buatkan Teks Bacaan</button>
+        <p class="eyebrow" id="aiStatus" style="display:none;margin-top:8px;"></p>
       </div>
 
       <div class="field">
@@ -1010,6 +1049,45 @@
   }
 
   // ---------- generate ----------
+  // ---------- generate teks otomatis (AI / Gemini, via serverless function) ----------
+  document.getElementById('aiGenerateBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('aiGenerateBtn');
+    const status = document.getElementById('aiStatus');
+    const jenjang = document.getElementById('aiJenjang').value;
+    const topik = document.getElementById('aiTopik').value.trim();
+    const panjang = document.getElementById('aiPanjang').value;
+
+    status.style.display = 'block';
+    if (!topik) { status.textContent = 'Isi topik bacaan dulu, misalnya "gotong royong" atau "hewan peliharaan".'; return; }
+
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Membuat teks...';
+    status.textContent = 'AI sedang menyusun bacaan, mohon tunggu beberapa detik...';
+
+    try {
+      const res = await fetch('/api/generate-teks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jenjang, topik, panjang })
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        status.textContent = 'Gagal membuat teks: ' + (data.error || 'terjadi kesalahan tak dikenal.') + ' Anda tetap bisa isi teks secara manual.';
+      } else {
+        document.getElementById('titleInput').value = data.title || '';
+        document.getElementById('inputText').value = data.content || '';
+        status.textContent = '✓ Teks berhasil dibuat oleh AI. Silakan periksa dulu sebelum disusun jadi lembar kerja.';
+      }
+    } catch (e) {
+      status.textContent = 'Gagal terhubung ke server (cek koneksi internet). Anda tetap bisa isi teks secara manual.';
+    }
+
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  });
+
   document.getElementById('generateBtn').addEventListener('click', () => {
     const text = document.getElementById('inputText').value.trim();
     if (!text) { alert('Mohon isi teks bacaan terlebih dulu.'); return; }
