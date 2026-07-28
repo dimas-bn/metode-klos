@@ -39,7 +39,7 @@ module.exports = async (req, res) => {
     : panjang === 'pendek' ? '60-90'
     : '100-140';
 
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
   const prompt =
     'Buatkan SATU teks bacaan berbahasa Indonesia untuk siswa jenjang ' + jenjang +
