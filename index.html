@@ -158,6 +158,10 @@
   }
   input[type="text"]:focus, textarea:focus, select:focus{ outline:2px solid var(--red); outline-offset:-1px; }
   textarea{ line-height:1.6; }
+  input[type="file"]{
+    width:100%; font-family: var(--font-sans); font-size:13px; color: var(--ink-soft);
+    background: #fff; border: 1.5px solid var(--ink); border-radius:0; padding:8px 10px;
+  }
 
   .ai-box{
     border: 1.5px dashed var(--ink); padding:14px; margin-bottom:18px;
@@ -392,6 +396,16 @@
         <p class="eyebrow" id="aiStatus" style="display:none;margin-top:8px;"></p>
       </div>
 
+      <div class="ai-box" style="background-image: repeating-linear-gradient(135deg, transparent, transparent 8px, rgba(21,34,51,.05) 8px, rgba(21,34,51,.05) 16px);">
+        <span class="eyebrow">📄 Impor Teks dari File (.docx / .pdf, opsional)</span>
+        <div class="ai-row" style="margin-top:10px;">
+          <div class="ai-col" style="flex:1;">
+            <input type="file" id="importFileInput" accept=".docx,.pdf">
+          </div>
+        </div>
+        <p class="eyebrow" id="importStatus" style="display:none;margin-top:8px;"></p>
+      </div>
+
       <div class="field">
         <label class="lbl">Teks bacaan</label>
         <textarea id="inputText" rows="7" placeholder="Tempel teks bacaan di sini...">Pagi itu, Ahmad bangun lebih awal dari biasanya. Ia bersiap untuk pergi ke sekolah karena hari ini ada upacara bendera. Setelah mandi dan sarapan, Ahmad mengenakan seragam putih merah yang rapi. Ibunya tersenyum melihat anaknya sudah siap berangkat. Di sepanjang jalan, Ahmad bertemu dengan teman-temannya. Mereka berjalan bersama menuju sekolah sambil bercerita dengan riang.</textarea>
@@ -534,9 +548,9 @@
 
   <footer>
     <div class="titleblock onblue" style="max-width:480px;margin:0 auto 18px;">
-      <div class="tb-cell"><span class="lbl">Engine</span><span class="val">Google Gemini (free tier)</span></div>
-      <div class="tb-cell"><span class="lbl">Database</span><span class="val">Supabase (free)</span></div>
-      <div class="tb-cell"><span class="lbl">Made by</span><span class="val"><a href="https://wa.me/6285641051211" target="_blank" rel="noopener">Dimas B.N.</a> with Claude AI</span></div>
+      <div class="tb-cell"><span class="lbl">Skala</span><span class="val">1:1</span></div>
+      <div class="tb-cell"><span class="lbl">Mesin</span><span class="val">Google Gemini (gratis)</span></div>
+      <div class="tb-cell"><span class="lbl">Dibuat oleh</span><span class="val"><a href="https://wa.me/6285641051211" target="_blank" rel="noopener">Dimas B.N.</a> · Claude AI</span></div>
     </div>
     <p>Aplikasi gratis untuk guru dan siswa Indonesia — bisa dipakai tanpa internet (offline)</p>
     <p>Kritik/Saran/Ide, silakan hubungi via <a href="https://wa.me/6285641051211" target="_blank" rel="noopener">WhatsApp</a></p>
@@ -1061,6 +1075,95 @@
   }
 
   // ---------- generate ----------
+  // ---------- impor teks dari file .docx / .pdf ----------
+  // Catatan versi: pdfjs-dist dipatok ke v3.11.174 (build "legacy", format skrip klasik
+  // <script> global) karena versi lebih baru pindah total ke ES module (.mjs) yang tidak
+  // kompatibel dengan cara pemuatan skrip sederhana di sini. Kalau suatu saat CDN ini mati,
+  // cari versi UMD/legacy terbaru di https://www.jsdelivr.com/package/npm/pdfjs-dist
+  let mammothLoaded = false, pdfjsLoaded = false;
+
+  function loadScript(src){
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('gagal memuat pustaka dari CDN'));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function extractTextFromDocx(arrayBuffer){
+    if (!mammothLoaded) {
+      await loadScript('https://cdn.jsdelivr.net/npm/mammoth@1.7.0/mammoth.browser.min.js');
+      mammothLoaded = true;
+    }
+    const result = await window.mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  }
+
+  async function extractTextFromPdf(arrayBuffer){
+    if (!pdfjsLoaded) {
+      await loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js');
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js';
+      pdfjsLoaded = true;
+    }
+    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pageTexts = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      pageTexts.push(content.items.map(item => item.str).join(' '));
+    }
+    return pageTexts.join('\n\n');
+  }
+
+  document.getElementById('importFileInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    const status = document.getElementById('importStatus');
+    status.style.display = 'block';
+    if (!file) return;
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext !== 'docx' && ext !== 'pdf') {
+      status.textContent = 'Format tidak didukung. Gunakan file .docx atau .pdf.';
+      e.target.value = '';
+      return;
+    }
+
+    status.textContent = 'Membaca file "' + file.name + '"...';
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      let text = '';
+
+      if (ext === 'docx') {
+        status.textContent = 'Memuat pustaka pembaca .docx...';
+        text = await extractTextFromDocx(arrayBuffer);
+      } else {
+        status.textContent = 'Memuat pustaka pembaca .pdf...';
+        text = await extractTextFromPdf(arrayBuffer);
+      }
+
+      text = text.trim().replace(/\n{3,}/g, '\n\n');
+
+      if (!text) {
+        status.textContent = 'Tidak ada teks yang bisa diambil dari file ini — kemungkinan hasil pindai/gambar (scan), bukan teks asli.';
+        return;
+      }
+
+      document.getElementById('inputText').value = text;
+      const nameNoExt = file.name.replace(/\.(docx|pdf)$/i, '');
+      if (!document.getElementById('titleInput').value.trim()) {
+        document.getElementById('titleInput').value = nameNoExt;
+      }
+      status.textContent = '✓ Teks berhasil diambil dari "' + file.name + '". Silakan periksa dulu (hasil ekstraksi kadang perlu sedikit rapikan) sebelum disusun jadi lembar kerja.';
+    } catch (err) {
+      status.textContent = 'Gagal membaca file: ' + err.message + '. Anda tetap bisa isi teks secara manual.';
+    } finally {
+      e.target.value = '';
+    }
+  });
+
   // ---------- generate teks otomatis (AI / Gemini, via serverless function) ----------
   document.getElementById('aiGenerateBtn').addEventListener('click', async () => {
     const btn = document.getElementById('aiGenerateBtn');
