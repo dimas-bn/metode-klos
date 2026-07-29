@@ -409,6 +409,9 @@
       <div class="field">
         <label class="lbl">Teks bacaan</label>
         <textarea id="inputText" rows="7" placeholder="Tempel teks bacaan di sini...">Pagi itu, Ahmad bangun lebih awal dari biasanya. Ia bersiap untuk pergi ke sekolah karena hari ini ada upacara bendera. Setelah mandi dan sarapan, Ahmad mengenakan seragam putih merah yang rapi. Ibunya tersenyum melihat anaknya sudah siap berangkat. Di sepanjang jalan, Ahmad bertemu dengan teman-temannya. Mereka berjalan bersama menuju sekolah sambil bercerita dengan riang.</textarea>
+        <div class="btnrow" style="margin-top:8px;">
+          <button class="btn" id="previewSpeakBtn" type="button">🔊 Dengarkan Pratinjau</button>
+        </div>
       </div>
 
       <div class="field">
@@ -471,6 +474,21 @@
     <div class="sheet-inner">
 
       <p class="instruction no-print" id="instructionText">Lengkapi setiap isian berdasarkan konteks kalimat.</p>
+
+      <div class="timer-box no-print" id="ttsBox">
+        <div>
+          <span class="eyebrow">🔊 Dengarkan Teks (isian tidak dibacakan)</span>
+        </div>
+        <div class="btnrow" style="margin:0; align-items:center;">
+          <select id="ttsRate" style="width:auto; padding:8px 10px; font-size:12.5px;">
+            <option value="0.75">0.75×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.25">1.25×</option>
+          </select>
+          <button class="btn primary" id="ttsPlayBtn" type="button">▶ Dengarkan</button>
+          <button class="btn" id="ttsStopBtn" type="button" style="display:none;">⏹ Berhenti</button>
+        </div>
+      </div>
 
       <div class="timer-box no-print" id="timerBox" style="display:none;">
         <div>
@@ -548,9 +566,9 @@
 
   <footer>
     <div class="titleblock onblue" style="max-width:480px;margin:0 auto 18px;">
-      <div class="tb-cell"><span class="lbl">Engine</span><span class="val">Google Gemini (free tier)</span></div>
-      <div class="tb-cell"><span class="lbl">Database</span><span class="val">Supabase (free)</span></div>
-      <div class="tb-cell"><span class="lbl">Made by</span><span class="val"><a href="https://wa.me/6285641051211" target="_blank" rel="noopener">Dimas B.N.</a> with Claude AI</span></div>
+      <div class="tb-cell"><span class="lbl">Skala</span><span class="val">1:1</span></div>
+      <div class="tb-cell"><span class="lbl">Mesin</span><span class="val">Google Gemini (gratis)</span></div>
+      <div class="tb-cell"><span class="lbl">Dibuat oleh</span><span class="val"><a href="https://wa.me/6285641051211" target="_blank" rel="noopener">Dimas B.N.</a> · Claude AI</span></div>
     </div>
     <p>Aplikasi gratis untuk guru dan siswa Indonesia — bisa dipakai tanpa internet (offline)</p>
     <p>Kritik/Saran/Ide, silakan hubungi via <a href="https://wa.me/6285641051211" target="_blank" rel="noopener">WhatsApp</a></p>
@@ -707,6 +725,64 @@
   let testFinished = false;
 
   document.querySelector('#answerBtn .btn-ic').innerHTML = ICON_EYE;
+
+  // ---------- text-to-speech (Web Speech API bawaan browser, tetap offline) ----------
+  const ttsSupported = 'speechSynthesis' in window;
+
+  function speakText(text, rate){
+    if (!ttsSupported || !text) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'id-ID';
+    utter.rate = rate || 1;
+    window.speechSynthesis.speak(utter);
+  }
+  function stopSpeaking(){
+    if (ttsSupported) window.speechSynthesis.cancel();
+  }
+
+  if (!ttsSupported) {
+    document.getElementById('previewSpeakBtn').disabled = true;
+    document.getElementById('previewSpeakBtn').textContent = '🔊 Text-to-speech tidak didukung browser ini';
+    document.getElementById('ttsBox').style.display = 'none';
+  } else {
+    document.getElementById('previewSpeakBtn').addEventListener('click', () => {
+      const btn = document.getElementById('previewSpeakBtn');
+      if (window.speechSynthesis.speaking) { stopSpeaking(); btn.textContent = '🔊 Dengarkan Pratinjau'; return; }
+      const text = document.getElementById('inputText').value.trim();
+      if (!text) { alert('Isi teks bacaan dulu.'); return; }
+      speakText(text, 1);
+      btn.textContent = '⏹ Berhenti';
+      const utterEnd = () => { btn.textContent = '🔊 Dengarkan Pratinjau'; window.speechSynthesis.removeEventListener('end', utterEnd); };
+      window.speechSynthesis.addEventListener('end', utterEnd);
+    });
+
+    document.getElementById('ttsPlayBtn').addEventListener('click', () => {
+      const spoken = tokens.map(para =>
+        para.tokens.map(t => {
+          if (t.type === 'sep') return t.text;
+          return t.blank ? 'titik titik' : t.text;
+        }).join('')
+      ).join('. ');
+      if (!spoken.trim()) return;
+      const rate = parseFloat(document.getElementById('ttsRate').value);
+      speakText(spoken, rate);
+      document.getElementById('ttsPlayBtn').style.display = 'none';
+      document.getElementById('ttsStopBtn').style.display = 'inline-flex';
+      const utterEnd = () => {
+        document.getElementById('ttsPlayBtn').style.display = 'inline-flex';
+        document.getElementById('ttsStopBtn').style.display = 'none';
+        window.speechSynthesis.removeEventListener('end', utterEnd);
+      };
+      window.speechSynthesis.addEventListener('end', utterEnd);
+    });
+
+    document.getElementById('ttsStopBtn').addEventListener('click', () => {
+      stopSpeaking();
+      document.getElementById('ttsPlayBtn').style.display = 'inline-flex';
+      document.getElementById('ttsStopBtn').style.display = 'none';
+    });
+  }
 
   // ---------- terima bacaan dari Bank Bacaan (guru.html) via localStorage ----------
   (function receiveHandoff(){
@@ -1206,6 +1282,7 @@
   document.getElementById('generateBtn').addEventListener('click', () => {
     const text = document.getElementById('inputText').value.trim();
     if (!text) { alert('Mohon isi teks bacaan terlebih dulu.'); return; }
+    stopSpeaking();
     tokens = tokenizeWithParagraphs(text);
     autoBlank();
     updateTitleBlock();
@@ -1218,6 +1295,7 @@
   });
 
   document.getElementById('backBtn').addEventListener('click', () => {
+    stopSpeaking();
     document.getElementById('worksheet').style.display = 'none';
     document.getElementById('setupSheet').style.display = 'block';
     clearInterval(timerInterval);
@@ -1227,6 +1305,9 @@
   document.getElementById('bankToggle').addEventListener('change', () => { if (tokens.length) render(); });
 
   document.getElementById('resetBtn').addEventListener('click', () => {
+    stopSpeaking();
+    document.getElementById('ttsPlayBtn').style.display = 'inline-flex';
+    document.getElementById('ttsStopBtn').style.display = 'none';
     autoBlank();
     updateTitleBlock();
     resetPracticeUI();
