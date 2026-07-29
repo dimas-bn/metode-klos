@@ -135,11 +135,57 @@
   footer a{ color: var(--text-onblue); text-decoration: none; font-weight:700; }
   footer a:hover{ text-decoration: underline; }
 
-  @media (max-width: 560px){ .sheet-inner{ padding: 20px; } .class-row{ flex-direction:column; align-items:flex-start; } }
+  @media (max-width: 560px){ .sheet-inner{ padding: 20px; } .class-row{ flex-direction:column; align-items:flex-start; } .a11y-bar{ top:auto; bottom:14px; right:14px; } }
+
+  /* ---------- aksesibilitas: kontras tinggi & ukuran teks ---------- */
+  .a11y-bar{
+    position: fixed; top: 14px; right: 14px; z-index: 500;
+    display:flex; align-items:center; gap:2px;
+    background: var(--blue-mid); border:1.5px solid var(--text-onblue-muted);
+    padding:4px; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+  }
+  .a11y-btn{
+    font-family: var(--font-mono); font-weight:700; font-size:12px;
+    color: var(--text-onblue); background:transparent; border:1.5px solid transparent;
+    padding:6px 9px; cursor:pointer; line-height:1;
+  }
+  .a11y-btn:hover{ border-color: var(--text-onblue-muted); }
+  .a11y-btn.active{ background: var(--red); border-color: var(--red); color:#fff; }
+  .a11y-sep{ width:1px; align-self:stretch; background: var(--blue-line-strong); margin:0 2px; }
+
+  body.a11y-text-l table.rekap{ font-size:15px !important; }
+  body.a11y-text-l .cell .val{ font-size:24px !important; }
+  body.a11y-text-xl table.rekap{ font-size:16.5px !important; }
+  body.a11y-text-xl .cell .val{ font-size:27px !important; }
+  body.a11y-text-l, body.a11y-text-xl { font-size:16px; }
+  body.a11y-text-xl { font-size:17.5px; }
+
+  body.a11y-contrast{
+    --blue-deep:#000000; --blue-mid:#000000;
+    --blue-line: rgba(255,255,255,.28); --blue-line-strong: rgba(255,255,255,.55);
+    --paper:#FFFFFF; --paper-edge:#000000;
+    --ink:#000000; --ink-soft:#000000;
+    --red:#CC0000; --red-soft:#FFE1E1;
+    --green:#006600; --green-soft:#DFFFE0;
+    --text-onblue:#FFFFFF; --text-onblue-muted:#FFFFFF;
+  }
+  body.a11y-contrast .sheet, body.a11y-contrast .btn, body.a11y-contrast .seg,
+  body.a11y-contrast .titleblock, body.a11y-contrast .tb-cell,
+  body.a11y-contrast input, body.a11y-contrast textarea, body.a11y-contrast select{
+    border-width:2px !important;
+  }
+
 </style>
 </head>
 <body>
 <div class="wrap">
+
+  <div class="a11y-bar no-print" id="a11yBar" role="group" aria-label="Pengaturan aksesibilitas">
+    <button class="a11y-btn" id="a11yContrastBtn" type="button" title="Aktifkan/matikan kontras tinggi">◐ Kontras</button>
+    <span class="a11y-sep"></span>
+    <button class="a11y-btn" id="a11yFontDownBtn" type="button" title="Perkecil teks">A-</button>
+    <button class="a11y-btn" id="a11yFontUpBtn" type="button" title="Perbesar teks">A+</button>
+  </div>
 
   <div class="brandbar">
     <div>
@@ -293,6 +339,39 @@
 
 <script>
 (function(){
+  // ---------- aksesibilitas: kontras tinggi & ukuran teks (tersimpan di perangkat) ----------
+  (function initAccessibility(){
+    const A11Y_KEY = 'metodeklos_a11y';
+    const FONT_CLASSES = ['', 'a11y-text-l', 'a11y-text-xl'];
+    const FONT_LABELS = ['A (Normal)', 'A+ (Besar)', 'A++ (Sangat Besar)'];
+    let state = { contrast: false, fontLevel: 0 };
+    try {
+      const saved = JSON.parse(localStorage.getItem(A11Y_KEY) || 'null');
+      if (saved) state = Object.assign(state, saved);
+    } catch(e) {}
+
+    function apply(){
+      document.body.classList.toggle('a11y-contrast', state.contrast);
+      FONT_CLASSES.forEach(c => { if (c) document.body.classList.remove(c); });
+      if (FONT_CLASSES[state.fontLevel]) document.body.classList.add(FONT_CLASSES[state.fontLevel]);
+
+      const contrastBtn = document.getElementById('a11yContrastBtn');
+      contrastBtn.classList.toggle('active', state.contrast);
+      contrastBtn.title = state.contrast ? 'Matikan kontras tinggi' : 'Aktifkan kontras tinggi';
+      document.getElementById('a11yFontDownBtn').disabled = state.fontLevel === 0;
+      document.getElementById('a11yFontUpBtn').disabled = state.fontLevel === FONT_CLASSES.length - 1;
+      document.getElementById('a11yFontDownBtn').title = 'Perkecil teks (saat ini: ' + FONT_LABELS[state.fontLevel] + ')';
+      document.getElementById('a11yFontUpBtn').title = 'Perbesar teks (saat ini: ' + FONT_LABELS[state.fontLevel] + ')';
+    }
+    function save(){ try { localStorage.setItem(A11Y_KEY, JSON.stringify(state)); } catch(e) {} }
+
+    document.getElementById('a11yContrastBtn').addEventListener('click', () => { state.contrast = !state.contrast; apply(); save(); });
+    document.getElementById('a11yFontUpBtn').addEventListener('click', () => { state.fontLevel = Math.min(FONT_CLASSES.length - 1, state.fontLevel + 1); apply(); save(); });
+    document.getElementById('a11yFontDownBtn').addEventListener('click', () => { state.fontLevel = Math.max(0, state.fontLevel - 1); apply(); save(); });
+
+    apply();
+  })();
+
   const SUPABASE_URL = 'https://hdgnxacbezihelmzxagw.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhkZ254YWNiZXppaGVsbXp4YWd3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUwMzQ1NzAsImV4cCI6MjEwMDYxMDU3MH0._f3rD2v-jrnhY4rMrT1pKPk3djSltU5cQlVmYV5Zogs';
 
