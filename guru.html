@@ -641,11 +641,39 @@
       btn.className = 'btn'; btn.type='button'; btn.textContent = 'Lihat Rekap';
       btn.addEventListener('click', () => { activeClassId = c.id; renderClassList(); loadRekap(c); });
       row.appendChild(btn);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn'; delBtn.type = 'button'; delBtn.textContent = 'Hapus';
+      delBtn.style.color = 'var(--red)'; delBtn.style.borderColor = 'var(--red)';
+      delBtn.addEventListener('click', () => deleteClass(c));
+      row.appendChild(delBtn);
+
       list.appendChild(row);
     });
   }
 
   function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+  async function deleteClass(c){
+    const confirmed = confirm(
+      'Hapus kelas "'+c.name+'" (kode '+c.code+')?\n\n' +
+      'Semua hasil latihan siswa yang tercatat di kelas ini akan ikut terhapus permanen. ' +
+      'Tindakan ini TIDAK BISA dibatalkan.'
+    );
+    if (!confirmed) return;
+
+    const { error: attemptsErr } = await sb.from('attempts').delete().eq('class_id', c.id);
+    if (attemptsErr) { alert('Gagal menghapus data hasil kelas: ' + attemptsErr.message); return; }
+
+    const { error: classErr } = await sb.from('classes').delete().eq('id', c.id);
+    if (classErr) { alert('Gagal menghapus kelas: ' + classErr.message); return; }
+
+    if (activeClassId === c.id) {
+      activeClassId = null;
+      document.getElementById('rekapSheet').style.display = 'none';
+    }
+    await loadClasses();
+  }
 
   document.getElementById('createClassBtn').addEventListener('click', async () => {
     const nameInput = document.getElementById('newClassName');
