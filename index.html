@@ -301,6 +301,16 @@
   }
   .chart-empty{ font-size:13px; color: var(--ink-soft); font-style:italic; padding:18px 6px; text-align:center; }
 
+  /* ---------- deteksi keterbacaan ---------- */
+  .rb-row{ display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; border-bottom:1px dashed var(--paper-edge); font-size:13px; }
+  .rb-row:last-of-type{ border-bottom:none; }
+  .rb-row .rb-lbl{ color: var(--ink-soft); }
+  .rb-row .rb-val{ font-family: var(--font-mono); font-weight:700; }
+  .rb-suggestion{ margin-top:10px; padding:10px 12px; border:1.5px solid var(--red); background: var(--red-soft); }
+  .rb-suggestion .eyebrow{ color: var(--ink-soft); }
+  .rb-suggestion .rb-verdict{ font-size:15px; font-weight:700; margin:4px 0 8px; }
+  .rb-note{ font-size:11.5px; color: var(--ink-soft); font-style:italic; margin-top:8px; }
+
   /* ---------- leaderboard ---------- */
   .lb-list{ display:grid; gap:6px; }
   .lb-row{ display:flex; align-items:center; gap:10px; padding:8px 10px; border:1.5px solid var(--paper-edge); }
@@ -464,7 +474,9 @@
         <textarea id="inputText" rows="7" placeholder="Tempel teks bacaan di sini...">Pagi itu, Ahmad bangun lebih awal dari biasanya. Ia bersiap untuk pergi ke sekolah karena hari ini ada upacara bendera. Setelah mandi dan sarapan, Ahmad mengenakan seragam putih merah yang rapi. Ibunya tersenyum melihat anaknya sudah siap berangkat. Di sepanjang jalan, Ahmad bertemu dengan teman-temannya. Mereka berjalan bersama menuju sekolah sambil bercerita dengan riang.</textarea>
         <div class="btnrow" style="margin-top:8px;">
           <button class="btn" id="previewSpeakBtn" type="button">🔊 Dengarkan Pratinjau</button>
+          <button class="btn" id="readabilityBtn" type="button">🔍 Deteksi Keterbacaan</button>
         </div>
+        <div class="chart-box" id="readabilityResult" style="display:none; margin-top:10px;"></div>
       </div>
 
       <div class="field">
@@ -780,6 +792,74 @@
   document.querySelector('#answerBtn .btn-ic').innerHTML = ICON_EYE;
 
   // ---------- text-to-speech (Web Speech API bawaan browser, tetap offline) ----------
+  // ---------- deteksi keterbacaan otomatis ----------
+  // Skor keterbacaan estimasi khas Metode Klos: dihitung dari rata-rata panjang
+  // kalimat (ASL) dan rata-rata suku kata per kata (ASW, dari gugus huruf vokal),
+  // lalu dinormalisasi ke rentang wajar Bahasa Indonesia. BUKAN rumus Flesch asli
+  // (koefisien Flesch versi Inggris tidak relevan untuk Bahasa Indonesia karena
+  // rata-rata suku kata per kata jauh lebih tinggi) — ini estimasi kasar untuk
+  // membantu guru memilih kerapatan, bukan pengukuran linguistik presisi.
+  function countSyllables(word){
+    const matches = word.toLowerCase().match(/[aiueo]+/g);
+    return matches ? matches.length : 1;
+  }
+
+  function analyzeReadability(text){
+    const sentences = text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+    const words = text.match(/[A-Za-zÀ-ÿ\u00C0-\u017F]+/g) || [];
+    const totalWords = words.length;
+    const totalSentences = Math.max(1, sentences.length);
+    const totalSyllables = words.reduce((sum, w) => sum + countSyllables(w), 0);
+
+    const asl = totalWords / totalSentences;
+    const asw = totalWords > 0 ? totalSyllables / totalWords : 0;
+
+    const aslNorm = Math.max(0, Math.min(1, (asl - 6) / (35 - 6)));
+    const aswNorm = Math.max(0, Math.min(1, (asw - 1.8) / (3.4 - 1.8)));
+    const score = 100 - (aslNorm * 50 + aswNorm * 50);
+
+    let band;
+    if (score >= 78) band = { label: 'Sangat mudah dibaca', jenjang: 'SD Kelas 1–4', level: 'mudah' };
+    else if (score >= 60) band = { label: 'Mudah dibaca', jenjang: 'SD Kelas 5–6 / awal SMP', level: 'mudah' };
+    else if (score >= 45) band = { label: 'Cukup — tingkat menengah', jenjang: 'SMP', level: 'sedang' };
+    else if (score >= 25) band = { label: 'Agak sulit', jenjang: 'SMA', level: 'sedang' };
+    else band = { label: 'Sulit dibaca', jenjang: 'Perguruan Tinggi / teks akademik', level: 'sulit' };
+
+    return { totalWords, totalSentences, asl, asw, score, band };
+  }
+
+  document.getElementById('readabilityBtn').addEventListener('click', () => {
+    const text = document.getElementById('inputText').value.trim();
+    const area = document.getElementById('readabilityResult');
+    area.style.display = 'block';
+    if (!text) { area.innerHTML = '<p class="chart-empty">Isi teks bacaan dulu.</p>'; return; }
+
+    const r = analyzeReadability(text);
+    const levelLabelMap = { mudah: 'Mudah (±15%)', sedang: 'Sedang (±25%)', sulit: 'Sulit (±35%)' };
+
+    area.innerHTML =
+      '<div class="rb-row"><span class="rb-lbl">Jumlah kata</span><span class="rb-val">'+r.totalWords+'</span></div>'+
+      '<div class="rb-row"><span class="rb-lbl">Jumlah kalimat</span><span class="rb-val">'+r.totalSentences+'</span></div>'+
+      '<div class="rb-row"><span class="rb-lbl">Rata-rata kata/kalimat</span><span class="rb-val">'+r.asl.toFixed(1)+'</span></div>'+
+      '<div class="rb-row"><span class="rb-lbl">Rata-rata suku kata/kata</span><span class="rb-val">'+r.asw.toFixed(2)+'</span></div>'+
+      '<div class="rb-row"><span class="rb-lbl">Skor keterbacaan (estimasi)</span><span class="rb-val">'+r.score.toFixed(0)+' / 100</span></div>'+
+      '<div class="rb-suggestion">'+
+        '<span class="eyebrow">Perkiraan Jenjang &amp; Saran Kerapatan</span>'+
+        '<p class="rb-verdict">'+r.band.label+' — cocok untuk '+r.band.jenjang+'</p>'+
+        '<button class="btn primary" id="applyReadabilityBtn" type="button">Terapkan Kerapatan "'+levelLabelMap[r.band.level]+'"</button>'+
+      '</div>'+
+      '<p class="rb-note">Catatan: ini estimasi otomatis berbasis panjang kalimat &amp; suku kata (disesuaikan untuk pola Bahasa Indonesia), bukan analisis linguistik presisi. Gunakan sebagai gambaran awal, tetap sesuaikan dengan penilaian Anda sebagai guru.</p>';
+
+    document.getElementById('applyReadabilityBtn').addEventListener('click', () => {
+      document.querySelectorAll('#levelRuler button').forEach(b => {
+        b.classList.toggle('active', b.dataset.level === r.band.level);
+      });
+      currentLevel = r.band.level;
+      document.getElementById('applyReadabilityBtn').textContent = '✓ Diterapkan';
+      document.getElementById('applyReadabilityBtn').disabled = true;
+    });
+  });
+
   const ttsSupported = 'speechSynthesis' in window;
 
   function speakText(text, rate){
