@@ -112,6 +112,15 @@
   .class-row .ccode{ font-family: var(--font-mono); background: var(--ink); color:#fff; padding:3px 8px; letter-spacing:.06em; }
   .class-row.active{ background: var(--green-soft); }
 
+  .bank-words{ display:flex; flex-wrap:wrap; gap:8px; }
+  .tag-pill{
+    font-family: var(--font-mono); font-size:11.5px; padding:5px 10px;
+    border:1.5px dashed var(--ink-soft); color: var(--ink-soft); cursor:pointer; background:#fff;
+  }
+  .tag-pill.active{ background: var(--ink); color:#fff; border-style:solid; border-color: var(--ink); }
+  .tag-pill.static{ cursor:default; border-style:solid; }
+  .reading-tags{ display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+
   table.rekap{ width:100%; border-collapse:collapse; font-size:13.5px; }
   table.rekap th, table.rekap td{ text-align:left; padding:8px 10px; border-bottom:1px solid var(--paper-edge); }
   table.rekap th{ font-family: var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color: var(--ink-soft); }
@@ -261,6 +270,10 @@
           <label class="lbl">Teks bacaan</label>
           <textarea id="readingContent" rows="5" placeholder="Tempel atau tulis teks bacaan di sini..." style="width:100%;font-family:var(--font-sans);font-size:15px;color:var(--ink);background:#fff;border:1.5px solid var(--ink);border-radius:0;padding:10px 12px;resize:vertical;"></textarea>
         </div>
+        <div class="field">
+          <label class="lbl">Kategori/Tag (opsional, pisahkan dengan koma)</label>
+          <input type="text" id="readingTags" placeholder="Contoh: IPA, Lingkungan, Kelas 5">
+        </div>
         <div class="field" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
           <div style="flex:1; min-width:160px;">
             <label class="lbl">Kerapatan default</label>
@@ -273,6 +286,11 @@
           <button class="btn primary" id="saveReadingBtn" type="button">+ Simpan ke Bank</button>
         </div>
         <p class="msg" id="readingMsg"></p>
+
+        <div class="field" id="tagFilterWrap" style="display:none; margin-top:14px;">
+          <label class="lbl">Filter berdasarkan tag</label>
+          <div class="bank-words" id="tagFilterBar"></div>
+        </div>
 
         <div class="class-list" id="readingList" style="margin-top:16px;"></div>
         <p class="empty-note" id="readingEmptyNote" style="display:none;">Belum ada bacaan tersimpan. Simpan bacaan pertama di atas untuk dipakai ulang nanti.</p>
@@ -695,28 +713,67 @@
   // ---------- BANK BACAAN ----------
   const LEVEL_LABEL_GURU = { mudah: 'Mudah', sedang: 'Sedang', sulit: 'Sulit' };
   let readings = [];
+  let activeTagFilter = null;
+
+  function parseTags(tagsStr){
+    return (tagsStr || '').split(',').map(t => t.trim()).filter(t => t.length > 0);
+  }
 
   async function loadReadings(){
-    const { data, error } = await sb.from('readings').select('id,title,content,level,created_at').eq('teacher_id', currentUser.id).order('created_at', { ascending:false });
+    const { data, error } = await sb.from('readings').select('id,title,content,level,tags,created_at').eq('teacher_id', currentUser.id).order('created_at', { ascending:false });
     if (error) { document.getElementById('readingMsg').className='msg err'; document.getElementById('readingMsg').textContent='Gagal memuat bank bacaan.'; return; }
     readings = data || [];
+    activeTagFilter = null;
+    renderTagFilterBar();
     renderReadingsList();
+  }
+
+  function renderTagFilterBar(){
+    const wrap = document.getElementById('tagFilterWrap');
+    const bar = document.getElementById('tagFilterBar');
+    const allTags = Array.from(new Set(readings.flatMap(r => parseTags(r.tags)))).sort((a,b) => a.localeCompare(b,'id'));
+    if (allTags.length === 0) { wrap.style.display = 'none'; bar.innerHTML = ''; return; }
+    wrap.style.display = 'block';
+    bar.innerHTML = '';
+
+    const allPill = document.createElement('span');
+    allPill.className = 'tag-pill' + (activeTagFilter === null ? ' active' : '');
+    allPill.textContent = 'Semua';
+    allPill.addEventListener('click', () => { activeTagFilter = null; renderTagFilterBar(); renderReadingsList(); });
+    bar.appendChild(allPill);
+
+    allTags.forEach(tag => {
+      const pill = document.createElement('span');
+      pill.className = 'tag-pill' + (activeTagFilter === tag ? ' active' : '');
+      pill.textContent = tag;
+      pill.addEventListener('click', () => { activeTagFilter = (activeTagFilter === tag ? null : tag); renderTagFilterBar(); renderReadingsList(); });
+      bar.appendChild(pill);
+    });
   }
 
   function renderReadingsList(){
     const list = document.getElementById('readingList');
     const emptyNote = document.getElementById('readingEmptyNote');
     list.innerHTML = '';
-    if (readings.length === 0) { emptyNote.style.display = 'block'; return; }
+
+    const filtered = activeTagFilter
+      ? readings.filter(r => parseTags(r.tags).includes(activeTagFilter))
+      : readings;
+
+    if (readings.length === 0) { emptyNote.style.display = 'block'; emptyNote.textContent = 'Belum ada bacaan tersimpan. Simpan bacaan pertama di atas untuk dipakai ulang nanti.'; return; }
+    if (filtered.length === 0) { emptyNote.style.display = 'block'; emptyNote.textContent = 'Tidak ada bacaan dengan tag "'+activeTagFilter+'".'; return; }
     emptyNote.style.display = 'none';
-    readings.forEach(r => {
+
+    filtered.forEach(r => {
       const row = document.createElement('div');
       row.className = 'class-row';
       const preview = r.content.length > 70 ? r.content.slice(0,70) + '…' : r.content;
+      const tagsHtml = parseTags(r.tags).map(t => '<span class="tag-pill static">'+escapeHtml(t)+'</span>').join('');
       row.innerHTML =
         '<div style="flex:1;min-width:200px;">'+
           '<span class="cname">'+escapeHtml(r.title)+'</span> &nbsp; <span class="ccode" style="background:var(--ink-soft);">'+(LEVEL_LABEL_GURU[r.level]||r.level)+'</span>'+
           '<div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px;">'+escapeHtml(preview)+'</div>'+
+          (tagsHtml ? '<div class="reading-tags">'+tagsHtml+'</div>' : '')+
         '</div>';
       const btnGroup = document.createElement('div');
       btnGroup.style.display = 'flex'; btnGroup.style.gap = '8px'; btnGroup.style.flexWrap='wrap';
@@ -739,14 +796,17 @@
     const title = document.getElementById('readingTitle').value.trim();
     const content = document.getElementById('readingContent').value.trim();
     const level = document.getElementById('readingLevel').value;
+    const tagsInput = document.getElementById('readingTags').value.trim();
+    const tags = parseTags(tagsInput).join(', ');
     const msg = document.getElementById('readingMsg');
     msg.className='msg'; msg.textContent='';
     if (!title || !content) { msg.className='msg err'; msg.textContent='Isi judul dan teks bacaan dulu.'; return; }
 
-    const { error } = await sb.from('readings').insert({ teacher_id: currentUser.id, title, content, level });
+    const { error } = await sb.from('readings').insert({ teacher_id: currentUser.id, title, content, level, tags });
     if (error) { msg.className='msg err'; msg.textContent='Gagal menyimpan: '+error.message; return; }
     document.getElementById('readingTitle').value = '';
     document.getElementById('readingContent').value = '';
+    document.getElementById('readingTags').value = '';
     msg.className='msg ok'; msg.textContent='Bacaan "'+title+'" tersimpan ke bank.';
     await loadReadings();
   });
